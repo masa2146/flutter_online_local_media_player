@@ -1,0 +1,41 @@
+name: bltx_media
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.8.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # State Management
+  flutter_bloc: ^9.1.1
+  equatable: ^2.0.7
+
+  # Media Players
+  just_audio: ^0.10.4
+  audio_service: ^0.18.18
+  video_player: ^2.10.0
+  file_picker: ^10.2.0
+
+  # Dependency Injection
+  get_it: ^8.0.3
+  injectable: ^2.5.0
+
+  # Utils
+  path_provider: ^2.1.5
+  permission_handler: ^12.0.1
+
+  # UI
+  flutter_svg: ^2.2.0
+  cached_network_image: ^3.4.1
+  device_info_plus: ^11.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
