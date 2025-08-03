@@ -1,14 +1,15 @@
 import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../../core/errors/failures.dart';
+import '../../../../core/utils/result.dart';
 import '../../domain/entities/media_item.dart';
 import '../../domain/entities/player_state.dart';
 import '../../domain/repositories/media_player_repository.dart';
-import '../datasources/media_player_datasource.dart';
 import '../datasources/background_audio_datasource.dart';
-import '../../../../core/utils/result.dart';
-import '../../../../core/errors/failures.dart';
+import '../datasources/media_player_datasource.dart';
 import '../datasources/video_player_datasource.dart';
 
 class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
@@ -19,7 +20,7 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
   bool _backgroundPlaybackEnabled = false;
 
   final StreamController<MediaItem?> _currentMediaController =
-  StreamController<MediaItem?>.broadcast();
+      StreamController<MediaItem?>.broadcast();
 
   StreamSubscription? _customEventSubscription;
   bool _isDisposed = false;
@@ -65,15 +66,12 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
   MediaPlayerDataSource _createDataSource(MediaItem mediaItem) {
     switch (mediaItem.type) {
       case MediaType.audio:
-      // Use background audio data source if background playback is enabled
-        if (_backgroundPlaybackEnabled) {
-          return BackgroundAudioDataSource();
-        } else {
-          return AudioPlayerDataSource();
-        }
+        // Use background audio data source if background playback is enabled
+        return BackgroundAudioDataSource();
+
       case MediaType.video:
       case MediaType.videoWithSeparateAudio:
-      // Video always uses regular video player (no background support for video)
+        // Video always uses regular video player (no background support for video)
         return VideoPlayerDataSource();
     }
   }
@@ -82,10 +80,11 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
     _customEventSubscription?.cancel();
 
     if (_currentDataSource is BackgroundAudioDataSource) {
-      final backgroundDataSource = _currentDataSource as BackgroundAudioDataSource;
+      final backgroundDataSource =
+          _currentDataSource as BackgroundAudioDataSource;
 
       _customEventSubscription = backgroundDataSource.customEventStream.listen(
-            (event) {
+        (event) {
           _handleCustomEvent(event);
         },
         onError: (error) {
@@ -109,7 +108,10 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
   }
 
   @override
-  Future<Result<void>> setPlaylist(List<MediaItem> playlist, {int startIndex = 0}) async {
+  Future<Result<void>> setPlaylist(
+    List<MediaItem> playlist, {
+    int startIndex = 0,
+  }) async {
     if (_isDisposed) return const Error(PlayerFailure('Repository disposed'));
 
     try {
@@ -155,7 +157,8 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
   @override
   Future<Result<void>> play() async {
     if (_isDisposed) return const Error(PlayerFailure('Repository disposed'));
-    if (_currentDataSource == null) return const Error(PlayerFailure('No media loaded'));
+    if (_currentDataSource == null)
+      return const Error(PlayerFailure('No media loaded'));
 
     try {
       await _currentDataSource!.play();
@@ -168,7 +171,8 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
   @override
   Future<Result<void>> pause() async {
     if (_isDisposed) return const Error(PlayerFailure('Repository disposed'));
-    if (_currentDataSource == null) return const Error(PlayerFailure('No media loaded'));
+    if (_currentDataSource == null)
+      return const Error(PlayerFailure('No media loaded'));
 
     try {
       await _currentDataSource!.pause();
@@ -181,7 +185,8 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
   @override
   Future<Result<void>> stop() async {
     if (_isDisposed) return const Error(PlayerFailure('Repository disposed'));
-    if (_currentDataSource == null) return const Error(PlayerFailure('No media loaded'));
+    if (_currentDataSource == null)
+      return const Error(PlayerFailure('No media loaded'));
 
     try {
       await _currentDataSource!.stop();
@@ -194,7 +199,8 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
   @override
   Future<Result<void>> seekTo(Duration position) async {
     if (_isDisposed) return const Error(PlayerFailure('Repository disposed'));
-    if (_currentDataSource == null) return const Error(PlayerFailure('No media loaded'));
+    if (_currentDataSource == null)
+      return const Error(PlayerFailure('No media loaded'));
 
     try {
       await _currentDataSource!.seekTo(position);
@@ -207,7 +213,8 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
   @override
   Future<Result<void>> setVolume(double volume) async {
     if (_isDisposed) return const Error(PlayerFailure('Repository disposed'));
-    if (_currentDataSource == null) return const Error(PlayerFailure('No media loaded'));
+    if (_currentDataSource == null)
+      return const Error(PlayerFailure('No media loaded'));
 
     try {
       await _currentDataSource!.setVolume(volume);
@@ -220,7 +227,8 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
   @override
   Future<Result<void>> setPlaybackSpeed(double speed) async {
     if (_isDisposed) return const Error(PlayerFailure('Repository disposed'));
-    if (_currentDataSource == null) return const Error(PlayerFailure('No media loaded'));
+    if (_currentDataSource == null)
+      return const Error(PlayerFailure('No media loaded'));
 
     try {
       await _currentDataSource!.setSpeed(speed);
@@ -236,7 +244,8 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
 
     if (_currentDataSource is BackgroundAudioDataSource) {
       try {
-        final backgroundDataSource = _currentDataSource as BackgroundAudioDataSource;
+        final backgroundDataSource =
+            _currentDataSource as BackgroundAudioDataSource;
         await backgroundDataSource.rewind();
         return const Success(null);
       } catch (e) {
@@ -246,7 +255,9 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
       // Fallback to seek backward 10 seconds
       final currentState = await playbackStateStream.first;
       final newPosition = currentState.position - const Duration(seconds: 10);
-      return await seekTo(newPosition < Duration.zero ? Duration.zero : newPosition);
+      return await seekTo(
+        newPosition < Duration.zero ? Duration.zero : newPosition,
+      );
     }
   }
 
@@ -255,7 +266,8 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
 
     if (_currentDataSource is BackgroundAudioDataSource) {
       try {
-        final backgroundDataSource = _currentDataSource as BackgroundAudioDataSource;
+        final backgroundDataSource =
+            _currentDataSource as BackgroundAudioDataSource;
         await backgroundDataSource.fastForward();
         return const Success(null);
       } catch (e) {
