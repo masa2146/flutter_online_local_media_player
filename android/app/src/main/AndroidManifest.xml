@@ -29,7 +29,8 @@
     <application
             android:label="bltx_media"
             android:name="${applicationName}"
-            android:icon="@mipmap/ic_launcher">
+            android:icon="@mipmap/ic_launcher"
+            android:usesCleartextTraffic="true">
         <activity
                 android:name=".MainActivity"
                 android:exported="true"
@@ -86,23 +87,19 @@
         </activity>
 
         <!-- ÖNEMLÍ: AudioService tanımlaması düzeltildi -->
-        <service
-                android:name="com.ryanheise.audioservice.AudioService"
-                android:enabled="true"
-                android:exported="true"
-                android:foregroundServiceType="mediaPlayback">
+        <service android:name="com.ryanheise.audioservice.AudioService"
+                 android:foregroundServiceType="mediaPlayback"
+                 android:exported="true" tools:ignore="Instantiatable">
             <intent-filter>
-                <action android:name="android.media.browse.MediaBrowserService"/>
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
 
         <!-- Media Button Receiver düzeltildi -->
-        <receiver
-                android:name="com.ryanheise.audioservice.MediaButtonReceiver"
-                android:enabled="true"
-                android:exported="true">
-            <intent-filter android:priority="1000">
-                <action android:name="android.intent.action.MEDIA_BUTTON"/>
+        <receiver android:name="com.ryanheise.audioservice.MediaButtonReceiver"
+                  android:exported="true" tools:ignore="Instantiatable">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </receiver>
 

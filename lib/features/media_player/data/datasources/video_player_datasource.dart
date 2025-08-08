@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
+
+import '../../../../core/errors/failures.dart';
+import '../../../../core/utils/url_helper.dart';
 import '../../domain/entities/media_item.dart';
 import '../../domain/entities/player_state.dart';
-import '../../../../core/errors/failures.dart';
 import 'media_player_datasource.dart';
 
 class VideoPlayerDataSource implements MediaPlayerDataSource {
@@ -43,20 +46,23 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
       _setupListeners(mediaItem);
 
       final duration = _getDuration();
-      _updateState(_currentState.copyWith(
-        status: PlaybackStatus.paused,
-        duration: duration,
-        position: Duration.zero,
-        error: null,
-      ));
+      _updateState(
+        _currentState.copyWith(
+          status: PlaybackStatus.paused,
+          duration: duration,
+          position: Duration.zero,
+          error: null,
+        ),
+      );
 
       debugPrint('VideoPlayerDataSource: Initialized successfully');
-
     } catch (e) {
-      _updateState(_currentState.copyWith(
-        status: PlaybackStatus.error,
-        error: 'Failed to initialize: $e',
-      ));
+      _updateState(
+        _currentState.copyWith(
+          status: PlaybackStatus.error,
+          error: 'Failed to initialize: $e',
+        ),
+      );
       rethrow;
     }
   }
@@ -82,17 +88,36 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
     if (mediaItem.source == MediaSource.local) {
       _videoController = VideoPlayerController.file(
         File(videoUrl),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+        videoPlayerOptions: VideoPlayerOptions(
+          mixWithOthers: false,
+          allowBackgroundPlayback: true,
+        ),
       );
     } else {
       _videoController = VideoPlayerController.networkUrl(
         Uri.parse(videoUrl),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: false),
+        videoPlayerOptions: VideoPlayerOptions(
+          mixWithOthers: false,
+          allowBackgroundPlayback: true,
+        ),
+        httpHeaders: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36',
+          'Accept': '*/*',
+          'Accept-Encoding': 'identity', // Compression'ı devre dışı bırak
+          'Referer': 'https://www.youtube.com/',
+          'Origin': 'https://www.youtube.com',
+          'Connection': 'keep-alive',
+        },
       );
     }
 
-    await _videoController!.initialize();
-    debugPrint('Video controller initialized');
+    try {
+      await _videoController!.initialize();
+      print('Video controller initialized successfully');
+    } catch (e) {
+      print('Video initialization error: $e');
+      throw PlayerFailure('Failed to initialize video: $e');
+    }
   }
 
   Future<void> _initializeAudioOnly(MediaItem mediaItem) async {
@@ -104,10 +129,31 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
     if (mediaItem.source == MediaSource.local) {
       await _audioPlayer!.setFilePath(audioUrl);
     } else {
-      await _audioPlayer!.setUrl(audioUrl);
-    }
+      // URL'i sanitize et
+      String sanitizedUrl;
+      try {
+        sanitizedUrl = MediaUrlHelper.sanitizeUrl(audioUrl);
+        print('Sanitized audio URL: $sanitizedUrl');
+      } catch (e) {
+        throw PlayerFailure('Invalid audio URL: $e');
+      }
 
-    debugPrint('Audio player initialized');
+      try {
+        await _audioPlayer!.setUrl(
+          sanitizedUrl,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36',
+            'Accept': '*/*',
+            'Accept-Encoding': 'identity',
+            'Connection': 'keep-alive',
+          },
+        );
+        print('Audio player initialized successfully');
+      } catch (e) {
+        print('Audio initialization error: $e');
+        throw PlayerFailure('Failed to initialize audio: $e');
+      }
+    }
   }
 
   Future<void> _initializeSeparateStreams(MediaItem mediaItem) async {
@@ -115,38 +161,97 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
     final audioUrl = mediaItem.playableAudioUrl;
 
     if (videoUrl == null || audioUrl == null) {
-      throw PlayerFailure('Both video and audio URLs required for separate streams');
+      throw PlayerFailure(
+        'Both video and audio URLs required for separate streams',
+      );
+    }
+
+    String sanitizedVideoUrl, sanitizedAudioUrl;
+
+    try {
+      if (mediaItem.source == MediaSource.network) {
+        sanitizedVideoUrl = MediaUrlHelper.sanitizeUrl(videoUrl);
+        sanitizedAudioUrl = MediaUrlHelper.sanitizeUrl(audioUrl);
+
+        // Her iki URL'in de erişilebilir olduğunu kontrol et
+        final videoReachable = await MediaUrlHelper.checkUrlConnectivity(
+          sanitizedVideoUrl,
+        );
+        final audioReachable = await MediaUrlHelper.checkUrlConnectivity(
+          sanitizedAudioUrl,
+        );
+
+        if (!videoReachable) throw PlayerFailure('Video URL is not reachable');
+        if (!audioReachable) throw PlayerFailure('Audio URL is not reachable');
+
+        print('Both URLs are reachable');
+      } else {
+        sanitizedVideoUrl = videoUrl;
+        sanitizedAudioUrl = audioUrl;
+      }
+    } catch (e) {
+      throw PlayerFailure('URL validation failed: $e');
     }
 
     // Initialize video controller
     if (mediaItem.source == MediaSource.local) {
       _videoController = VideoPlayerController.file(
-        File(videoUrl),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true), // Allow audio mixing
+        File(sanitizedVideoUrl),
+        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
       );
     } else {
       _videoController = VideoPlayerController.networkUrl(
-        Uri.parse(videoUrl),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        Uri.parse(sanitizedVideoUrl),
+        videoPlayerOptions: VideoPlayerOptions(
+          mixWithOthers: true,
+          allowBackgroundPlayback: true,
+        ),
+        httpHeaders: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36',
+          'Accept': '*/*',
+          'Accept-Encoding': 'identity',
+          'Connection': 'keep-alive',
+        },
       );
     }
 
     // Initialize audio player
     _audioPlayer = AudioPlayer();
 
-    // Initialize both
-    await Future.wait([
-      _videoController!.initialize(),
-      mediaItem.source == MediaSource.local
-          ? _audioPlayer!.setFilePath(audioUrl)
-          : _audioPlayer!.setUrl(audioUrl),
-    ]);
+    // Initialize both with proper error handling
+    try {
+      final futures = <Future>[];
 
-    // Mute video since we have separate audio
-    await _videoController!.setVolume(0.0);
+      futures.add(_videoController!.initialize());
 
-    _isSyncedPlayback = true;
-    debugPrint('Separate streams initialized - Video: $videoUrl, Audio: $audioUrl');
+      if (mediaItem.source == MediaSource.local) {
+        futures.add(_audioPlayer!.setFilePath(sanitizedAudioUrl));
+      } else {
+        futures.add(
+          _audioPlayer!.setUrl(
+            sanitizedAudioUrl,
+            headers: {
+              'User-Agent':
+              'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36',
+              'Accept': '*/*',
+              'Accept-Encoding': 'identity',
+              'Connection': 'keep-alive',
+            },
+          ),
+        );
+      }
+
+      await Future.wait(futures);
+
+      // Mute video since we have separate audio
+      await _videoController!.setVolume(0.0);
+
+      _isSyncedPlayback = true;
+      print('Separate streams initialized successfully');
+    } catch (e) {
+      print('Separate streams initialization error: $e');
+      throw PlayerFailure('Failed to initialize separate streams: $e');
+    }
   }
 
   void _setupListeners(MediaItem mediaItem) {
@@ -157,26 +262,20 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
 
     if (_audioPlayer != null) {
       // Audio state listener - FİX: Daha detaylı state handling
-      _audioStateSubscription = _audioPlayer!.playerStateStream.listen(
-            (state) {
-          if (!_isDisposed) {
-            _onAudioStateUpdate(state);
-          }
-        },
-        onError: (error) => debugPrint('Audio state error: $error'),
-      );
+      _audioStateSubscription = _audioPlayer!.playerStateStream.listen((state) {
+        if (!_isDisposed) {
+          _onAudioStateUpdate(state);
+        }
+      }, onError: (error) => debugPrint('Audio state error: $error'));
 
       // Audio position listener - throttled
       _audioPositionSubscription = _audioPlayer!.positionStream
           .where((_) => !_isDisposed && !_isSeeking)
-          .listen(
-            (position) {
-          if (!_isDisposed) {
-            _onAudioPositionUpdate(position);
-          }
-        },
-        onError: (error) => debugPrint('Audio position error: $error'),
-      );
+          .listen((position) {
+        if (!_isDisposed) {
+          _onAudioPositionUpdate(position);
+        }
+      }, onError: (error) => debugPrint('Audio position error: $error'));
     }
 
     // Start position tracking
@@ -197,8 +296,12 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
     PlaybackStatus newStatus = _currentState.status;
 
     if (value.isPlaying != _currentState.isPlaying) {
-      newStatus = value.isPlaying ? PlaybackStatus.playing : PlaybackStatus.paused;
-      debugPrint('Video playback state changed: ${value.isPlaying ? "playing" : "paused"}');
+      newStatus = value.isPlaying
+          ? PlaybackStatus.playing
+          : PlaybackStatus.paused;
+      debugPrint(
+        'Video playback state changed: ${value.isPlaying ? "playing" : "paused"}',
+      );
     }
 
     // Update buffering state
@@ -225,13 +328,14 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
         newBuffering != _currentState.isBuffering ||
         newPosition != _currentState.position ||
         newError != _currentState.error) {
-
-      _updateState(_currentState.copyWith(
-        status: newStatus,
-        isBuffering: newBuffering,
-        position: newPosition,
-        error: newError,
-      ));
+      _updateState(
+        _currentState.copyWith(
+          status: newStatus,
+          isBuffering: newBuffering,
+          position: newPosition,
+          error: newError,
+        ),
+      );
     }
   }
 
@@ -258,12 +362,16 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
         status = PlaybackStatus.idle;
     }
 
-    debugPrint('Audio state update: ${state.processingState} - playing: ${state.playing} -> status: $status');
+    debugPrint(
+      'Audio state update: ${state.processingState} - playing: ${state.playing} -> status: $status',
+    );
 
-    _updateState(_currentState.copyWith(
-      status: status,
-      isBuffering: state.processingState == ProcessingState.buffering,
-    ));
+    _updateState(
+      _currentState.copyWith(
+        status: status,
+        isBuffering: state.processingState == ProcessingState.buffering,
+      ),
+    );
   }
 
   void _onAudioPositionUpdate(Duration position) {
@@ -313,7 +421,9 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
 
     // If difference is more than 100ms, resync
     if (difference > const Duration(milliseconds: 100)) {
-      debugPrint('Sync drift detected: ${difference.inMilliseconds}ms - resyncing...');
+      debugPrint(
+        'Sync drift detected: ${difference.inMilliseconds}ms - resyncing...',
+      );
 
       _isSeeking = true;
 
@@ -368,7 +478,6 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
 
       // FİX: Hemen playing state'ini güncelleyelim
       _updateState(_currentState.copyWith(status: PlaybackStatus.playing));
-
     } catch (e) {
       debugPrint('Play error: $e');
       throw PlayerFailure('Failed to play: $e');
@@ -386,13 +495,11 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
       await _audioPlayer!.seek(videoPosition);
 
       // Start both simultaneously
-      await Future.wait([
-        _videoController!.play(),
-        _audioPlayer!.play(),
-      ]);
+      await Future.wait([_videoController!.play(), _audioPlayer!.play()]);
 
-      debugPrint('Synced playback started at position: ${videoPosition.inMilliseconds}ms');
-
+      debugPrint(
+        'Synced playback started at position: ${videoPosition.inMilliseconds}ms',
+      );
     } catch (e) {
       debugPrint('Synced play error: $e');
       rethrow;
@@ -414,7 +521,6 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
       // FİX: Hemen paused state'ini güncelleyelim
       _updateState(_currentState.copyWith(status: PlaybackStatus.paused));
       debugPrint('Paused successfully');
-
     } catch (e) {
       debugPrint('Pause error: $e');
       throw PlayerFailure('Failed to pause: $e');
@@ -431,10 +537,12 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
         if (_audioPlayer != null) _audioPlayer!.stop(),
       ]);
 
-      _updateState(_currentState.copyWith(
-        status: PlaybackStatus.stopped,
-        position: Duration.zero,
-      ));
+      _updateState(
+        _currentState.copyWith(
+          status: PlaybackStatus.stopped,
+          position: Duration.zero,
+        ),
+      );
     } catch (e) {
       throw PlayerFailure('Failed to stop: $e');
     }
@@ -454,13 +562,13 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
         await _seekSynced(clampedPosition);
       } else {
         await Future.wait([
-          if (_videoController != null) _videoController!.seekTo(clampedPosition),
+          if (_videoController != null)
+            _videoController!.seekTo(clampedPosition),
           if (_audioPlayer != null) _audioPlayer!.seek(clampedPosition),
         ]);
       }
 
       _updateState(_currentState.copyWith(position: clampedPosition));
-
     } catch (e) {
       throw PlayerFailure('Failed to seek: $e');
     } finally {
@@ -481,7 +589,6 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
       ]);
 
       debugPrint('Synced seek to: ${position.inMilliseconds}ms');
-
     } catch (e) {
       debugPrint('Synced seek error: $e');
       rethrow;
@@ -526,7 +633,8 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
 
     try {
       await Future.wait([
-        if (_videoController != null) _videoController!.setPlaybackSpeed(clampedSpeed),
+        if (_videoController != null)
+          _videoController!.setPlaybackSpeed(clampedSpeed),
         if (_audioPlayer != null) _audioPlayer!.setSpeed(clampedSpeed),
       ]);
 
@@ -573,7 +681,10 @@ class VideoPlayerDataSource implements MediaPlayerDataSource {
 
   // Getters for video controller access (needed for UI)
   VideoPlayerController? get videoController => _videoController;
+
   bool get hasVideoController => _videoController != null;
+
   bool get isVideoInitialized => _videoController?.value.isInitialized == true;
+
   AudioPlayer? get audioPlayer => _audioPlayer;
 }

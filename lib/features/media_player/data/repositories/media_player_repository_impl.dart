@@ -20,7 +20,7 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
   bool _backgroundPlaybackEnabled = false;
 
   final StreamController<MediaItem?> _currentMediaController =
-      StreamController<MediaItem?>.broadcast();
+  StreamController<MediaItem?>.broadcast();
 
   StreamSubscription? _customEventSubscription;
   bool _isDisposed = false;
@@ -45,20 +45,38 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
     if (_isDisposed) return const Error(PlayerFailure('Repository disposed'));
 
     try {
-      await _disposeCurrentDataSource();
+      // **DEĞİŞİKLİK:** Sadece farklı medya tipine geçiyorsak DataSource'u değiştir
+      bool needsNewDataSource = false;
+
+      if (_currentDataSource == null) {
+        needsNewDataSource = true;
+      } else if (_currentMedia?.type != mediaItem.type) {
+        // Medya tipi değişti (audio <-> video), yeni datasource lazım
+        needsNewDataSource = true;
+      } else if (mediaItem.type == MediaType.video && _currentDataSource is! VideoPlayerDataSource) {
+        needsNewDataSource = true;
+      } else if (mediaItem.type == MediaType.audio && _currentDataSource is! BackgroundAudioDataSource) {
+        needsNewDataSource = true;
+      }
+
+      if (needsNewDataSource) {
+        debugPrint('Creating new DataSource for media type: ${mediaItem.type}');
+        await _disposeCurrentDataSource();
+        _currentDataSource = _createDataSource(mediaItem);
+        _setupCustomEventListener();
+      } else {
+        debugPrint('Reusing existing DataSource for media type: ${mediaItem.type}');
+      }
 
       _currentMedia = mediaItem;
       _currentMediaController.add(mediaItem);
 
-      // Create appropriate data source based on media type and background setting
-      _currentDataSource = _createDataSource(mediaItem);
+      // Medyayı yükle (mevcut DataSource ile)
       await _currentDataSource!.initialize(mediaItem);
-
-      // Listen to custom events for background audio (skip controls)
-      _setupCustomEventListener();
 
       return const Success(null);
     } catch (e) {
+      debugPrint('Error loading media: $e');
       return Error(PlayerFailure('Failed to load media: $e'));
     }
   }
@@ -66,12 +84,12 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
   MediaPlayerDataSource _createDataSource(MediaItem mediaItem) {
     switch (mediaItem.type) {
       case MediaType.audio:
-        // Use background audio data source if background playback is enabled
+      // Use background audio data source if background playback is enabled
         return BackgroundAudioDataSource();
 
       case MediaType.video:
       case MediaType.videoWithSeparateAudio:
-        // Video always uses regular video player (no background support for video)
+      // Video always uses regular video player (no background support for video)
         return VideoPlayerDataSource();
     }
   }
@@ -81,10 +99,10 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
 
     if (_currentDataSource is BackgroundAudioDataSource) {
       final backgroundDataSource =
-          _currentDataSource as BackgroundAudioDataSource;
+      _currentDataSource as BackgroundAudioDataSource;
 
       _customEventSubscription = backgroundDataSource.customEventStream.listen(
-        (event) {
+            (event) {
           _handleCustomEvent(event);
         },
         onError: (error) {
@@ -109,9 +127,9 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
 
   @override
   Future<Result<void>> setPlaylist(
-    List<MediaItem> playlist, {
-    int startIndex = 0,
-  }) async {
+      List<MediaItem> playlist, {
+        int startIndex = 0,
+      }) async {
     if (_isDisposed) return const Error(PlayerFailure('Repository disposed'));
 
     try {
@@ -245,7 +263,7 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
     if (_currentDataSource is BackgroundAudioDataSource) {
       try {
         final backgroundDataSource =
-            _currentDataSource as BackgroundAudioDataSource;
+        _currentDataSource as BackgroundAudioDataSource;
         await backgroundDataSource.rewind();
         return const Success(null);
       } catch (e) {
@@ -267,7 +285,7 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
     if (_currentDataSource is BackgroundAudioDataSource) {
       try {
         final backgroundDataSource =
-            _currentDataSource as BackgroundAudioDataSource;
+        _currentDataSource as BackgroundAudioDataSource;
         await backgroundDataSource.fastForward();
         return const Success(null);
       } catch (e) {
@@ -325,7 +343,13 @@ class MediaPlayerRepositoryImpl implements MediaPlayerRepository {
     if (_isDisposed) return;
     _isDisposed = true;
 
+    debugPrint('MediaPlayerRepositoryImpl: Disposing...');
+
     await _disposeCurrentDataSource();
     await _currentMediaController.close();
+
+    // **YENİ:** Uygulama kapanırken shared resources'ı temizle
+    // Sadece son repository instance'ı dispose edilirken çağrılmalı
+    // await BackgroundAudioDataSource.disposeSharedResources();
   }
 }
